@@ -19,7 +19,7 @@ import { createLabel, updateLabel, deleteLabel, listLabels, findLabelByName, get
 import { createFilter, listFilters, getFilter, deleteFilter, filterTemplates, GmailFilterCriteria, GmailFilterAction } from "./filter-manager.js";
 import { parseEmailAddresses, filterOutEmail, addRePrefix, buildReferencesHeader, buildReplyAllRecipients } from "./reply-all-helpers.js";
 import { DEFAULT_SCOPES, scopeNamesToUrls, parseScopes, validateScopes, hasScope, getAvailableScopeNames } from "./scopes.js";
-import { toolDefinitions, toMcpTools, getToolByName, SendEmailSchema, ReadEmailSchema, SearchEmailsSchema, ModifyEmailSchema, DeleteEmailSchema, BatchModifyEmailsSchema, ReportPhishingSchema, BatchReportPhishingSchema, BatchDeleteEmailsSchema, CreateLabelSchema, UpdateLabelSchema, DeleteLabelSchema, GetOrCreateLabelSchema, CreateFilterSchema, GetFilterSchema, DeleteFilterSchema, CreateFilterFromTemplateSchema, DownloadAttachmentSchema, ReplyAllSchema, GetThreadSchema, ListInboxThreadsSchema, GetInboxWithThreadsSchema, DownloadEmailSchema, ModifyThreadSchema, SendDraftSchema, DeleteDraftSchema, UpdateDraftSchema } from "./tools.js";
+import { toolDefinitions, toMcpTools, getToolByName, SendEmailSchema, ReadEmailSchema, SearchEmailsSchema, ModifyEmailSchema, DeleteEmailSchema, BatchModifyEmailsSchema, ReportPhishingSchema, BatchReportPhishingSchema, BatchDeleteEmailsSchema, CreateLabelSchema, UpdateLabelSchema, DeleteLabelSchema, GetOrCreateLabelSchema, CreateFilterSchema, GetFilterSchema, DeleteFilterSchema, CreateFilterFromTemplateSchema, DownloadAttachmentSchema, ReplyAllSchema, GetThreadSchema, ListInboxThreadsSchema, GetInboxWithThreadsSchema, DownloadEmailSchema, ModifyThreadSchema, ListDraftsSchema, GetDraftSchema, SendDraftSchema, DeleteDraftSchema, UpdateDraftSchema } from "./tools.js";
 import { gmailMessageToJson, emailToTxt, emailToHtml, EmailAttachment } from "./email-export.js";
 import { resolveToolPrefix } from "./tool-prefix.js";
 
@@ -792,6 +792,105 @@ async function main() {
                             {
                                 type: "text",
                                 text: `Email ${validatedArgs.messageId} deleted successfully`,
+                            },
+                        ],
+                    };
+                }
+
+                case "list_drafts": {
+                    const validatedArgs = ListDraftsSchema.parse(args);
+                    const response = await gmail.users.drafts.list({
+                        userId: 'me',
+                        q: validatedArgs.query,
+                        maxResults: validatedArgs.maxResults,
+                        pageToken: validatedArgs.pageToken,
+                        includeSpamTrash: validatedArgs.includeSpamTrash,
+                    });
+
+                    const drafts = response.data.drafts || [];
+                    const draftDetails: Array<Record<string, unknown>> = [];
+
+                    // Fetch recognizable metadata without returning potentially large bodies.
+                    // Batches keep high maxResults values from issuing hundreds of requests at once.
+                    for (let offset = 0; offset < drafts.length; offset += 10) {
+                        const batch = drafts.slice(offset, offset + 10);
+                        const details = await Promise.all(batch.map(async (draft) => {
+                            if (!draft.id) {
+                                return null;
+                            }
+
+                            const detail = await gmail.users.drafts.get({
+                                userId: 'me',
+                                id: draft.id,
+                                format: 'metadata',
+                            });
+                            const message = detail.data.message;
+                            const headers = extractHeaders(message?.payload);
+
+                            return {
+                                draftId: detail.data.id || draft.id,
+                                messageId: message?.id || null,
+                                threadId: message?.threadId || null,
+                                subject: headers.subject,
+                                from: headers.from,
+                                to: headers.to,
+                                cc: headers.cc,
+                                bcc: headers.bcc,
+                                date: headers.date,
+                                snippet: message?.snippet || '',
+                            };
+                        }));
+
+                        for (const draft of details) {
+                            if (draft) {
+                                draftDetails.push(draft);
+                            }
+                        }
+                    }
+
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    drafts: draftDetails,
+                                    nextPageToken: response.data.nextPageToken || null,
+                                    resultSizeEstimate: response.data.resultSizeEstimate || 0,
+                                }, null, 2),
+                            },
+                        ],
+                    };
+                }
+
+                case "get_draft": {
+                    const validatedArgs = GetDraftSchema.parse(args);
+                    const response = await gmail.users.drafts.get({
+                        userId: 'me',
+                        id: validatedArgs.draftId,
+                        format: 'full',
+                    });
+
+                    // A draft is a wrapper around a message; every header/body lives on
+                    // draft.message, so unwrap once and reuse the read_email extractors.
+                    const message = response.data.message;
+                    const payload = (message?.payload || {}) as GmailMessagePart;
+                    const { subject, from, to, cc, bcc, date, rfcMessageId } = extractHeaders(message?.payload);
+                    const { text, html } = extractEmailContent(payload);
+                    const attachments = extractAttachments(payload);
+
+                    const body = text || html || '';
+                    const contentTypeNote = !text && html ?
+                        '[Note: This draft is HTML-formatted. Plain text version not available.]\n\n' : '';
+
+                    const attachmentInfo = attachments.length > 0 ?
+                        `\n\nAttachments (${attachments.length}):\n` +
+                        attachments.map(a => `- ${a.filename} (${a.mimeType}, ${Math.round(a.size/1024)} KB, ID: ${a.id})`).join('\n') : '';
+
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Draft ID: ${response.data.id || validatedArgs.draftId}\nThread ID: ${message?.threadId || ''}\nMessage ID: ${message?.id || ''}\nMessage-ID: ${rfcMessageId}\nSubject: ${subject}\nFrom: ${from}\nTo: ${to}${cc ? `\nCC: ${cc}` : ''}${bcc ? `\nBCC: ${bcc}` : ''}\nDate: ${date}\n\n${contentTypeNote}${body}${attachmentInfo}`,
                             },
                         ],
                     };

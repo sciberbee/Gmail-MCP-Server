@@ -57,6 +57,19 @@ export const DeleteEmailSchema = z.object({
 });
 
 // Draft lifecycle schemas
+export const ListDraftsSchema = z.object({
+  query: z.string().optional().describe("Gmail search query used to filter drafts"),
+  maxResults: z.number().int().min(1).max(500).optional().default(20)
+    .describe("Maximum number of drafts to return (default: 20, maximum: 500)"),
+  pageToken: z.string().optional().describe("Page token returned by a previous list_drafts call"),
+  includeSpamTrash: z.boolean().optional().default(false)
+    .describe("Whether to include drafts in Spam and Trash (default: false)"),
+});
+
+export const GetDraftSchema = z.object({
+  draftId: z.string().describe("ID of the draft to retrieve (returned by draft_email or list_drafts)"),
+});
+
 export const SendDraftSchema = z.object({
   draftId: z.string().describe("ID of the draft to send (returned by draft_email)"),
 });
@@ -311,6 +324,20 @@ export const toolDefinitions: ToolDefinition[] = [
     schema: SendEmailSchema,
     scopes: ["gmail.modify", "gmail.compose"],
     annotations: { title: "Draft Email", destructiveHint: false },
+  },
+  {
+    name: "list_drafts",
+    description: "Lists Gmail drafts with IDs, thread IDs, recipients, subject, date, and snippet. Supports Gmail search syntax and pagination; use get_draft with a returned draftId to retrieve full content.",
+    schema: ListDraftsSchema,
+    scopes: ["gmail.readonly", "gmail.modify", "gmail.compose"],
+    annotations: { title: "List Drafts", readOnlyHint: true },
+  },
+  {
+    name: "get_draft",
+    description: "Retrieves one draft's full content (headers, body, attachments) by draftId. Use this when a thread holds several drafts: Gmail's web UI surfaces only one draft per thread, so the others are unreachable in the GUI but still readable here. Pair with list_drafts to enumerate, then update_draft or send_draft using the same draftId.",
+    schema: GetDraftSchema,
+    scopes: ["gmail.readonly", "gmail.modify", "gmail.compose"],
+    annotations: { title: "Get Draft", readOnlyHint: true },
   },
   {
     name: "send_draft",

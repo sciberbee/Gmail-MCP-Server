@@ -33,7 +33,7 @@ There's a downstream fork that took this in the **maximalist** direction. I'm no
 - **Thread-level tools** - `get_thread`, `list_inbox_threads`, `get_inbox_with_threads`, `modify_thread` for efficient thread-based email operations in a single call
 - **CC/BCC visibility** - `read_email` now shows CC and BCC headers when present ([PR #21](https://github.com/ArtyMcLabin/Gmail-MCP-Server/pull/21) by [@panghy](https://github.com/panghy))
 - **Phishing report tools** - `report_phishing` and `batch_report_phishing` for marking messages as spam via the Gmail API ([PR #24](https://github.com/ArtyMcLabin/Gmail-MCP-Server/pull/24) by [@ShivamB25](https://github.com/ShivamB25))
-- **Draft lifecycle tools** - `send_draft`, `delete_draft`, `update_draft` close the orphan-draft gap: `send_draft` atomically sends an existing draft and removes it from Drafts (no ghost copy); `update_draft` mutates a draft in place preserving its ID (no draft pile-up across iteration loops); `delete_draft` discards an abandoned draft ([PR #30](https://github.com/ArtyMcLabin/Gmail-MCP-Server/pull/30) by [@thisisambros](https://github.com/thisisambros))
+- **Draft lifecycle tools** - `list_drafts`, `get_draft`, `send_draft`, `delete_draft`, `update_draft` cover the full draft lifecycle: list/search drafts with pagination, read one by ID, send atomically without a ghost copy, mutate in place, or discard abandoned drafts. `list_drafts` + `get_draft` also work around a Gmail web UI limitation — when one thread holds several drafts the UI surfaces only one of them, leaving the rest unreachable in the browser but still addressable by `draftId` here.
 - **Tool annotations** - MCP spec annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) on all tools for safer LLM tool execution ([PR #14](https://github.com/ArtyMcLabin/Gmail-MCP-Server/pull/14) by [@bryankthompson](https://github.com/bryankthompson))
 - **Download email tool** - `download_email` saves emails to disk in json/eml/txt/html formats without consuming LLM context ([PR #13](https://github.com/ArtyMcLabin/Gmail-MCP-Server/pull/13) by [@icanhasjonas](https://github.com/icanhasjonas))
 - **Durable OAuth sessions** - `refresh_token` is persisted across restarts, ending the hourly re-auth loop ([PR #35](https://github.com/ArtyMcLabin/Gmail-MCP-Server/pull/35) by [@BrentBaccala](https://github.com/BrentBaccala))
@@ -284,7 +284,7 @@ The server automatically filters available tools based on your authorized scopes
 
 | Tools | Required Scope (any) |
 |-------|---------------------|
-| `read_email`, `search_emails`, `download_attachment` | `gmail.readonly` or `gmail.modify` |
+| `read_email`, `search_emails`, `download_attachment`, `list_drafts`, `get_draft` | `gmail.readonly` or `gmail.modify` |
 | `list_email_labels` | `gmail.readonly`, `gmail.modify`, or `gmail.labels` |
 | `send_email`, `draft_email`, `reply_all`, `send_draft` | `gmail.modify`, `gmail.compose`, or `gmail.send` |
 | `delete_draft`, `update_draft` | `gmail.modify` or `gmail.compose` |
@@ -324,11 +324,13 @@ Then add to your Claude Code MCP settings (`~/.claude/mcp_settings.json` or proj
 }
 ```
 
-With read-only scopes, only these 4 tools will be available to Claude:
+With read-only scopes, these tools will be available to Claude:
 - `read_email` - Read email content
 - `search_emails` - Search your inbox
 - `list_email_labels` - List available labels
 - `download_attachment` - Download attachments
+- `list_drafts` - List drafts with subject, recipients, search, and pagination
+- `get_draft` - Read one draft's full content by `draftId`
 
 ### Full Access Configuration
 
